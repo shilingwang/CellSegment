@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 2.8)
+project( CellSegment )
+set(CMAKE_CXX_FLAGS "-std=c++11")
+find_package( OpenCV REQUIRED )
+add_executable( CellSegment main.cpp )
+target_link_libraries( CellSegment ${OpenCV_LIBS} )
