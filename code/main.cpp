@@ -1,4 +1,5 @@
 #include "opencv2/core/core.hpp"
+#include "opencv2/core/optim.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/features2d.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
@@ -18,8 +19,6 @@ class CellSegmenter {
 		vector<Point2f>::iterator selected;
 		int edge_gradient_width;
 		
-		Mat voronoi;
-		Mat voronoiForScoring;
 		Mat output;
 		Mat preOutput;
 		
@@ -55,19 +54,20 @@ class CellSegmenter {
 			background.convertTo(backgroundForScoring, CV_32F);
 		}
 		
-		void computeVoronoiImage() {
+		Mat computeVoronoiImage(const vector<Point2f>& points) {
 			Size size = background.size();
 			Rect rect(0, 0, size.width, size.height);
 			Subdiv2D subdiv(rect);
 			
-			for (auto it = centers.begin(); it!=centers.end(); ++it)
+			for (auto it = points.begin(); it != points.end(); ++it)
 				subdiv.insert(*it);
 			
 			vector<vector<Point2f>> facets;
-			subdiv.getVoronoiFacetList(vector<int>(), facets, centers);
+			vector<Point2f> facetCenters;
+			subdiv.getVoronoiFacetList(vector<int>(), facets, facetCenters);
 			vector<Point> ifacet;
 			vector<vector<Point>> ifacets(1);
-			voronoi = Mat::zeros(background.rows, background.cols, CV_8UC1);
+			Mat voronoi = Mat::zeros(background.rows, background.cols, CV_8UC1);
 			for (size_t i = 0; i < facets.size(); i++) {
 				ifacet.resize(facets[i].size());
 				for (size_t j = 0; j < facets[i].size(); j++)
@@ -79,11 +79,12 @@ class CellSegmenter {
 			 
 				ifacets[0] = ifacet;
 				polylines(voronoi, ifacets, true, 255, 1, CV_AA, 0);
-			}			
+			}
+			return voronoi;		
 		}
 		
-		Mat computeEdgeGradiant() {
-			Mat thicken, thickenToShow;
+		Mat computeEdgeGradiant(const Mat& voronoi) {
+			Mat thicken, edgeGradientForScoring;
 			Mat element = getStructuringElement(
 				MORPH_RECT, Size(2*edge_gradient_width + 1, 2*edge_gradient_width+1),
                 Point(edge_gradient_width, edge_gradient_width)
@@ -92,18 +93,25 @@ class CellSegmenter {
 			dilate(voronoi, thicken, element);
 			threshold(thicken, thicken, 0, 255, 0);
 			distanceTransform(thicken, thicken, CV_DIST_L1, 5);
-			normalize(thicken, thickenToShow, 0, 255, NORM_MINMAX, CV_8UC1);
-			normalize(thicken, voronoiForScoring, 0.0, 1.0, NORM_MINMAX);
+			normalize(thicken, edgeGradientForScoring, 0.0, 1.0, NORM_MINMAX);
+			edgeGradientForScoring = edgeGradientForScoring * (1/norm(edgeGradientForScoring, NORM_L1));
+			// TODO: renormalize sum of edge gradient map to 1
+			cout << computeScore(edgeGradientForScoring) << endl;
+			return edgeGradientForScoring;
+		}	
 			
+		Mat computeVoronoiToShow(const Mat& edgeGradientForScoring) {
+			Mat thickenToShow;
+			normalize(edgeGradientForScoring, thickenToShow, 0, 255, NORM_MINMAX, CV_8UC1);
 			return thickenToShow;
 		}
 		
 		void computeOutputImage() {
 			vector<cv::Mat> images(3);	
 			Mat black = Mat::zeros(background.rows, background.cols, CV_8UC1);
-			Mat input = computeEdgeGradiant();
+			Mat input = computeVoronoiToShow(computeEdgeGradiant(computeVoronoiImage(centers)));
 			
-			for (size_t i=0; i<centers.size();i++)
+			for (size_t i=0; i<centers.size(); i++)
 				circle(input, centers[i], 5, 255, CV_FILLED, CV_AA, 0);
 			
 			images.at(0) = black;
@@ -112,9 +120,29 @@ class CellSegmenter {
 			merge(images, preOutput);
 		}
 		
-		double computeScore() {
-			Mat result = backgroundForScoring.mul(voronoiForScoring);
-			return sum(result).val[0];
+		double computeScore(const Mat& edgeGradientForScoring) {
+			return backgroundForScoring.dot(edgeGradientForScoring);
+		}
+		
+		vector<Point2f> buildSafePointVector(const double *data) {
+			vector<Point2f> points;
+			points.resize(centers.size());
+			const Size size = background.size();
+			for (size_t i=0; i<points.size(); i++) {
+				float x = *data++;
+				float y = *data++;
+				x = std::max<float>(x, 0);
+				x = std::min<float>(x, size.width-1);
+				y = std::max<float>(y, 0);
+				y = std::min<float>(y, size.height-1);
+				points.push_back({x, y});
+			}
+			return points;
+		}
+		
+		// TODO: be smarter at handling values outside iamge bounds to have better optmization properties
+		double computeScore(const double *data) {
+			return computeScore(computeEdgeGradiant(computeVoronoiImage(buildSafePointVector(data))));
 		}
 		
 		void displayImage() {
@@ -132,7 +160,6 @@ class CellSegmenter {
 			bool recompute(true);
 			do {
 				if (recompute) {
-					computeVoronoiImage();
 					computeOutputImage();
 					recompute = false;
 				}
@@ -184,6 +211,17 @@ void onEdgeGradientWidthChanged(int value, void *userData) {
 	cellSegmenter->displayImage();
 }
 
+class ScoreFunction: cv::MinProblemSolver::Function {
+	CellSegmenter* cellSegmenter;
+	
+	virtual double calc (const double *x) const {
+		return cellSegmenter->computeScore(x);
+	}
+ 
+	virtual int getDims () const {
+		return cellSegmenter->centers.size() * 2;
+	}
+};
 
 int main(int argc, char** argv){
 	//initialization
