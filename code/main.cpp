@@ -33,7 +33,7 @@ class CellSegmenter {
 		Mat preOutput;
 		
 		CellSegmenter(const char* filename):
-			edge_gradient_width(10) {
+			edge_gradient_width(40) {
 			Mat img = imread(filename,CV_LOAD_IMAGE_UNCHANGED);
 			if (img.empty())
 				throw invalid_argument("Error: Image cannot be loaded!");
@@ -105,7 +105,6 @@ class CellSegmenter {
 			distanceTransform(thicken, thicken, CV_DIST_L1, 5);
 			normalize(thicken, edgeGradientForScoring, 0.0, 1.0, NORM_MINMAX);
 			edgeGradientForScoring = edgeGradientForScoring * (1/norm(edgeGradientForScoring, NORM_L1));
-			// TODO: renormalize sum of edge gradient map to 1
 			cout << computeScore(edgeGradientForScoring) << endl;
 			return edgeGradientForScoring;
 		}	
@@ -152,11 +151,10 @@ class CellSegmenter {
 		void setCenters(const Mat& linearArray) {
 			const Size size = background.size();
 			for (size_t i=0; i<centers.size(); i++) {
-				//centers[i].x = linearArray.at<float>(2*i);
-				//centers[i].y = linearArray.at<float>(2*i + 1);
-				// FIXME: something is wrong in getting the result back
-				centers[i].x = std::min<float>(size.width-1, std::max<float>(0, linearArray.at<float>(2*i)));
-				centers[i].y = std::min<float>(size.height-1, std::max<float>(0, linearArray.at<float>(2*i + 1)));
+				//centers[i].x = linearArray.at<double>(2*i);
+				//centers[i].y = linearArray.at<double>(2*i + 1);
+				centers[i].x = std::min<float>(size.width-1, std::max<float>(0, linearArray.at<double>(2*i)));
+				centers[i].y = std::min<float>(size.height-1, std::max<float>(0, linearArray.at<double>(2*i + 1)));
 			}	
 		}
 		
@@ -183,7 +181,7 @@ class CellSegmenter {
 		
 		void run() {
 			namedWindow("My cells", 1);
-			createTrackbar("optimizer edge gradient width", "My cells", &edge_gradient_width, 50, onEdgeGradientWidthChanged,  this);
+			createTrackbar("optimizer edge gradient width", "My cells", &edge_gradient_width, 300, onEdgeGradientWidthChanged,  this);
 			
 			int myKey;
 			bool recompute(true);
@@ -196,7 +194,7 @@ class CellSegmenter {
 				displayImage();
 		
 				myKey = waitKey();
-				cout << myKey << endl;
+				//cout << myKey << endl;
 				switch (myKey) {
 					case 1048585: { //tab
 						if (selected == (--centers.end())) {
@@ -234,12 +232,12 @@ class CellSegmenter {
 						cv::Ptr<cv::DownhillSolver> solver = cv::DownhillSolver::create(
 							new ScoreFunction(this),
 							Mat_<double>::ones(centers.size() * 2, 1) * 5,
-							TermCriteria(TermCriteria::MAX_ITER+TermCriteria::EPS, 100, 0.001) 
+							TermCriteria(TermCriteria::MAX_ITER+TermCriteria::EPS, 10000, 0.0001) 
 						);
 						Mat x(mat1DFromCenter());
 						solver->minimize(x);
 						setCenters(x);
-						cout << x << endl;
+						//cout << x << endl;
 						cout << "done" << endl;
 						recompute = true;
 						break;
