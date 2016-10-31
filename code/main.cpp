@@ -10,6 +10,16 @@ using namespace std;
 
 void onEdgeGradientWidthChanged(int value, void *userData);
 
+class CellSegmenter;
+
+struct ScoreFunction: public cv::MinProblemSolver::Function {
+	CellSegmenter* cellSegmenter;
+	
+	ScoreFunction(CellSegmenter* cellSegmenter): cellSegmenter(cellSegmenter) {} 
+	virtual double calc (const double *x) const;
+	virtual int getDims () const;
+};
+
 class CellSegmenter {
 	public:
 		Mat background;
@@ -85,7 +95,7 @@ class CellSegmenter {
 		
 		Mat computeEdgeGradiant(const Mat& voronoi) {
 			Mat thicken, edgeGradientForScoring;
-			Mat element = getStructuringElement(
+			Mat element = getStructuringElement(	
 				MORPH_RECT, Size(2*edge_gradient_width + 1, 2*edge_gradient_width+1),
                 Point(edge_gradient_width, edge_gradient_width)
             );
@@ -126,9 +136,8 @@ class CellSegmenter {
 		
 		vector<Point2f> buildSafePointVector(const double *data) {
 			vector<Point2f> points;
-			points.resize(centers.size());
 			const Size size = background.size();
-			for (size_t i=0; i<points.size(); i++) {
+			for (size_t i=0; i<centers.size(); i++) {
 				float x = *data++;
 				float y = *data++;
 				x = std::max<float>(x, 0);
@@ -140,7 +149,27 @@ class CellSegmenter {
 			return points;
 		}
 		
-		// TODO: be smarter at handling values outside iamge bounds to have better optmization properties
+		void setCenters(const Mat& linearArray) {
+			const Size size = background.size();
+			for (size_t i=0; i<centers.size(); i++) {
+				//centers[i].x = linearArray.at<float>(2*i);
+				//centers[i].y = linearArray.at<float>(2*i + 1);
+				// FIXME: something is wrong in getting the result back
+				centers[i].x = std::min<float>(size.width-1, std::max<float>(0, linearArray.at<float>(2*i)));
+				centers[i].y = std::min<float>(size.height-1, std::max<float>(0, linearArray.at<float>(2*i + 1)));
+			}	
+		}
+		
+		Mat mat1DFromCenter() const {
+			Mat_<double> value(centers.size() * 2, 1);
+			for (int i=0; i<value.rows; i += 2) {
+				value.at<double>(i) = centers[i/2].x; 
+				value.at<double>(i+1) = centers[i/2].y;
+			}
+			return value;
+		}
+		
+		// TODO: be smarter at handling values outside image bounds to have better optmization properties
 		double computeScore(const double *data) {
 			return computeScore(computeEdgeGradiant(computeVoronoiImage(buildSafePointVector(data))));
 		}
@@ -167,6 +196,7 @@ class CellSegmenter {
 				displayImage();
 		
 				myKey = waitKey();
+				cout << myKey << endl;
 				switch (myKey) {
 					case 1048585: { //tab
 						if (selected == (--centers.end())) {
@@ -196,7 +226,24 @@ class CellSegmenter {
 						recompute = true;
 						break;
 					}
-			
+					case 1048690: { // r
+						break;
+					}
+					case 1048687: { // o
+						cout << "Optimizing" << endl;
+						cv::Ptr<cv::DownhillSolver> solver = cv::DownhillSolver::create(
+							new ScoreFunction(this),
+							Mat_<double>::ones(centers.size() * 2, 1) * 5,
+							TermCriteria(TermCriteria::MAX_ITER+TermCriteria::EPS, 100, 0.001) 
+						);
+						Mat x(mat1DFromCenter());
+						solver->minimize(x);
+						setCenters(x);
+						cout << x << endl;
+						cout << "done" << endl;
+						recompute = true;
+						break;
+					}
 					default:
 					break;						
 				}
@@ -211,17 +258,21 @@ void onEdgeGradientWidthChanged(int value, void *userData) {
 	cellSegmenter->displayImage();
 }
 
-class ScoreFunction: cv::MinProblemSolver::Function {
-	CellSegmenter* cellSegmenter;
-	
-	virtual double calc (const double *x) const {
-		return cellSegmenter->computeScore(x);
+double ScoreFunction::calc (const double *x) const {
+/*	const double* xp(x);
+	for (int i = 0; i < getDims(); ++i) {
+		cerr << *xp++ << " ";
+		if (i % 2 == 1)
+			cerr << endl;
 	}
- 
-	virtual int getDims () const {
-		return cellSegmenter->centers.size() * 2;
-	}
-};
+	cerr << endl; */
+	const double score(cellSegmenter->computeScore(x));
+	return -score;
+}
+
+int ScoreFunction::getDims () const {
+	return cellSegmenter->centers.size() * 2;
+}
 
 int main(int argc, char** argv){
 	//initialization
