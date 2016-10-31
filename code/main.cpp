@@ -195,8 +195,8 @@ class CellSegmenter {
 		
 				myKey = waitKey();
 				//cout << myKey << endl;
-				switch (myKey) {
-					case 1048585: { //tab
+				switch (myKey & 0xff) {
+					case '\t': { //tab
 						if (selected == (--centers.end())) {
 							selected = centers.begin();
 						}
@@ -204,30 +204,30 @@ class CellSegmenter {
 							++selected;
 						break;
 					}
-					case 1048695: { //up
+					case 'w': { //up
 						selected->y -= 2;
 						recompute = true;
 						break;
 					}
-					case 1048691: {
+					case 's': {
 						selected->y += 2;
 						recompute = true;
 						break;
 					}
-					case 1048673: {
+					case 'a': {
 						selected->x -= 2;
 						recompute = true;
 						break;
 					}
-					case 1048676: {
+					case 'd': {
 						selected->x += 2;
 						recompute = true;
 						break;
 					}
-					case 1048690: { // r
+					case 'r': { // r
 						break;
 					}
-					case 1048687: { // o
+					case 'o': { // o
 						cout << "Optimizing" << endl;
 						cv::Ptr<cv::DownhillSolver> solver = cv::DownhillSolver::create(
 							new ScoreFunction(this),
