@@ -1,5 +1,5 @@
 # CellSegment
-This is tool to generate a voronoi diagram representation of cell segmentation. 
+This is a tool to generate a voronoi diagram representation of cell segmentation. 
 
 After compiling the code, you can input the cell image.
 In the folder "./data" you can find a sample image.
